@@ -1,0 +1,81 @@
+##########1.添加盒子##########
+gmx editconf -f merge_gmx.gro -o rep_newbox.gro -c -d 1.0 -bt cubic 
+
+##########2.添加水模型##########
+gmx solvate -cp rep_newbox.gro -cs spc216.gro -o rep_solv.gro -p merge_topol.top
+
+##########3.添加离子##########
+gmx grompp -f ref.ions.mdp -c rep_solv.gro -p merge_topol.top -o ions.tpr -maxwarn 2
+
+##########4.平衡电荷##########
+gmx genion -s ions.tpr -o solv_ions.gro -p merge_topol.top -pname NA -nname CL -neutral 
+>可以选择15 (SOL)
+
+##########5.能量最小化##########
+#最速下降法(Steepest Descent Method)
+gmx grompp -f ref.em_steep.mdp -c solv_ions.gro -p merge_topol.top -o em.tpr -maxwarn 2
+gmx mdrun -v -deffnm em
+#共轭梯度法(Conjugate Gradient Method)
+gmx grompp -f ref.em_cg.mdp -c em.gro -p merge_topol.top -o em.tpr -maxwarn 2
+gmx mdrun -v -deffnm em
+
+##########6.构象限制##########
+gmx genrestr -f lig.gro -o posre_lig.itp -fc 1000 1000 1000
+> 2   (选择配体)
+gmx make_ndx -f em.gro -o index.ndx 
+> 1 | 13    （选择蛋白和配体）
+> q   回车
+
+##########7.NVT预平衡##########
+gmx grompp -f ref.nvt.mdp -c em.gro -r em.gro -p merge_topol.top -n index.ndx -o nvt.tpr -maxwarn 3
+gmx mdrun -v -deffnm nvt -nb gpu
+
+##########8.NPT预平衡##########
+gmx grompp -f ref.npt.mdp -c nvt.gro -r nvt.gro -t nvt.cpt -p merge_topol.top -n index.ndx -o npt.tpr -maxwarn 3
+gmx mdrun -v -deffnm npt -nb gpu
+
+##########9.分子动力学模拟##########
+gmx grompp -f ref.md.mdp -c npt.gro -r npt.gro -t npt.cpt -p merge_topol.top -n index.ndx -o md_0_1.tpr -maxwarn 3
+gmx mdrun -v -deffnm md_0_1 -nb gpu
+
+##########10.轨迹矫正##########
+gmx trjconv -s md_0_1.tpr -f md_0_1.xtc -o mdw.xtc -pbc whole   
+> 选择 0 ("System")
+gmx trjconv -s md_0_1.tpr -f mdw.xtc -o md.xtc -pbc mol -center
+> 选择 1 ("Protein") 作为中心 ，然后选择 0 ("System")进行输出
+
+##########11.计算RMSD##########
+gmx rms -s md_0_1.tpr -f md.xtc -o pic.rmsd.xvg
+> 两次都选择 4 ("Backbone")进行拟合以及RMSD的计算
+
+##########12.计算蛋白加配体的RMSD##########
+gmx make_ndx -f md_0_1.gro -o index2.ndx
+> 1 | 13    （选择蛋白和配体）
+> q  回车
+gmx rms -s md_0_1.tpr -f md.xtc -n index2.ndx -o pic.rmsd2.xvg
+> 两次都选择 20 ("Protein_MOL")进行拟合以及RMSD的计算
+
+##########13.计算RMSF##########
+gmx rmsf -s md_0_1.tpr -f md.xtc -res -o pic.rmsf.xvg
+> 选择 1 ("protein")
+
+##########14.计算蛋白的回转半径##########
+gmx gyrate -s md_0_1.tpr -f md.xtc -o pic.gyrate.xvg
+> 选择 4 ("Backbone")
+
+##########15.计算溶剂可及表面积##########
+gmx sasa -s md_0_1.tpr -f md.xtc -surface -o pic.area.xvg
+> 选择 1 ("protein")
+
+##########16.计算氢键##########
+gmx hbond -s md_0_1.tpr -f md.xtc -num pic.hbnum.xvg
+> 依次选择 1 ("protein")和 13 (配体名)
+
+##########17.生成分子动力学模拟轨迹的动画##########
+gmx trjconv -f md.xtc -s md_0_1.tpr -o delWater.pdb -pbc mol -n index.ndx -dt 100 -center -ur compact
+#-dt 100(每100ps生成一帧动画，一帧约5M内存)
+> 先选protein，选择non-water
+
+
+
+
